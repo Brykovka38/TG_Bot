@@ -17,12 +17,12 @@ BOT_TOKEN = "8316945407:AAEepiQe2QtOhHgCEfgGRJWL5ygghPiDiEg"
 def get_cat_image(points):
     """Возвращает путь к локальной картинке котика"""
     cat_images = {
-        0: "cat_images/1.jpg",      
-        250: "cat_images/2.jpg",    
-        500: "cat_images/3.jpg",    
-        750: "cat_images/4.jpg",   
-        1000: "cat_images/5.jpg",   
-        1500: "cat_images/6.jpg",   
+        0: "1.jpg",      
+        250: "2.jpg",    
+        500: "3.jpg",    
+        750: "4.jpg",   
+        1000: "5.jpg",   
+        1500: "6.jpg",   
     }
 
     suitable_levels = [level for level in cat_images.keys() if points >= level]
@@ -777,3 +777,4 @@ if __name__ == "__main__":
 
 # # Токен вашего бота
 # BOT_TOKEN = "8316945407:AAEepiQe2QtOhHgCEfgGRJWL5ygghPiDiEg"
+
