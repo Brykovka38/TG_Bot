@@ -37,7 +37,7 @@ class DeadlineManager:
         self.init_database()
     
     def init_database(self):
-        conn = sqlite3.connect('deadlines.db')
+		conn = sqlite3.connect('/data/deadlines.db')
         cursor = conn.cursor()
         
         # Таблица пользователей
@@ -71,7 +71,7 @@ class DeadlineManager:
         conn.close()
     
     def get_or_create_user(self, user_id: int, username: str = ""):
-        conn = sqlite3.connect('deadlines.db')
+        conn = sqlite3.connect('/data/deadlines.db')
         cursor = conn.cursor()
         
         cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
@@ -87,7 +87,7 @@ class DeadlineManager:
         conn.close()
     
     def add_task(self, user_id: int, task_name: str, deadline_date: str, deadline_time: str = "23:59"):
-        conn = sqlite3.connect('deadlines.db')
+        conn = sqlite3.connect('/data/deadlines.db')
         cursor = conn.cursor()
         
         cursor.execute(
@@ -101,7 +101,7 @@ class DeadlineManager:
         return task_id
     
     def complete_task(self, user_id: int, task_id: int):
-        conn = sqlite3.connect('deadlines.db')
+        conn = sqlite3.connect('/data/deadlines.db')
         cursor = conn.cursor()
         
         # Помечаем задачу как выполненную
@@ -131,7 +131,7 @@ class DeadlineManager:
         conn.close()
     
     def get_user_tasks(self, user_id: int, include_completed: bool = False):
-        conn = sqlite3.connect('deadlines.db')
+        conn = sqlite3.connect('/data/deadlines.db')
         cursor = conn.cursor()
         
         if include_completed:
@@ -151,7 +151,7 @@ class DeadlineManager:
         return tasks
     
     def get_user_stats(self, user_id: int):
-        conn = sqlite3.connect('deadlines.db')
+        conn = sqlite3.connect('/data/deadlines.db')
         cursor = conn.cursor()
         
         cursor.execute('SELECT total_points, completed_tasks FROM users WHERE user_id = ?', (user_id,))
@@ -170,7 +170,7 @@ class DeadlineManager:
     
     def get_overdue_tasks(self):
         """Получить просроченные задачи, которым нужно отправить уведомление"""
-        conn = sqlite3.connect('deadlines.db')
+        conn = sqlite3.connect('/data/deadlines.db')
         cursor = conn.cursor()
         
         now = datetime.datetime.now()
@@ -251,7 +251,7 @@ async def check_deadlines(context: ContextTypes.DEFAULT_TYPE):
                 )
                 
                 # ОБНОВЛЯЕМ ВРЕМЯ ПОСЛЕДНЕГО УВЕДОМЛЕНИЯ
-                conn = sqlite3.connect('deadlines.db')
+                conn = sqlite3.connect('/data/deadlines.db')
                 cursor = conn.cursor()
                 cursor.execute(
                     'UPDATE tasks SET last_notification = ? WHERE task_id = ?',
@@ -777,5 +777,4 @@ if __name__ == "__main__":
 
 # # Токен вашего бота
 # BOT_TOKEN = "8316945407:AAEepiQe2QtOhHgCEfgGRJWL5ygghPiDiEg"
-
 
