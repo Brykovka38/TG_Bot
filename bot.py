@@ -608,43 +608,69 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
                 parse_mode='Markdown'
             )
             context.user_data['state'] = ADDING_DATE
-        
+
         elif state == ADDING_DATE:
-            try:
-                # Проверяем корректность даты
-                parts = text.split('.')
-                if len(parts) != 3:
-                    raise ValueError("Неверный формат даты")
+			try:
+				# Убираем возможные пробелы
+				text = text.strip()
         
-                day, month, year = map(int, parts)
+				# Проверяем корректность даты
+				parts = text.split('.')
+				if len(parts) != 3:
+					raise ValueError("Неверный формат даты")
+
+				# Проверяем что все части - числа
+				if not all(part.isdigit() for part in parts):
+					raise ValueError("Дата должна содержать только цифры")
+
+				day, month, year = map(int, parts)
         
-                # Исправляем год если он в коротком формате
-                if year < 100:
-                    if year < 50:  # 00-49 -> 2000-2049
-                        year += 2000
-                    else:  # 50-99 -> 1950-1999
-                        year += 1900
+				# Проверяем диапазоны
+				if day < 1 or day > 31:
+					raise ValueError("День должен быть от 1 до 31")
+				if month < 1 or month > 12:
+					raise ValueError("Месяц должен быть от 1 до 12")
+				if year < 1000 or year > 2100:
+					raise ValueError("Год должен быть от 1000 до 2100")
+
+				# Проверяем корректность даты
+				deadline_date_obj = datetime.date(year, month, day)
+				deadline_date = deadline_date_obj.isoformat()
+
+				context.user_data['deadline_date'] = deadline_date
         
-                # Проверяем корректность даты
-                deadline_date_obj = datetime.date(year, month, day)
-                deadline_date = deadline_date_obj.isoformat()
+				await update.message.reply_text(
+					"⏰ *Введите время дедлайна (ЧЧ:ММ):*\n\n"
+					"Пример: 18:30\n"
+					"Или отправьте 'нет' для времени по умолчанию (23:59)",
+					parse_mode='Markdown'
+				)
+				context.user_data['state'] = ADDING_TIME
         
-                context.user_data['deadline_date'] = deadline_date
-                
-                await update.message.reply_text(
-                    "⏰ *Введите время дедлайна (ЧЧ:ММ):*\n\n"
-                    "Пример: 18:30\n"
-                    "Или отправьте 'нет' для времени по умолчанию (23:59)",
-                    parse_mode='Markdown'
-                )
-                context.user_data['state'] = ADDING_TIME
-            except:
-                await update.message.reply_text(
-                    "❌ *Неверный формат даты!*\n"
-                    "Пожалуйста, введите дату в формате ДД.ММ.ГГГГ\n"
-                    "Пример: 25.12.2024",
-                    parse_mode='Markdown'
-                )
+				except ValueError as e:
+					error_msg = str(e)
+					if "day is out of range" in error_msg.lower():
+						await update.message.reply_text(
+						"❌ *Неверная дата!*\n"
+						"В этом месяце нет такого дня!\n"
+						"Пожалуйста, введите корректную дату:",
+						parse_mode='Markdown'
+						)
+					else:
+						await update.message.reply_text(
+						f"❌ *Неверный формат даты!*\n"
+						f"Ошибка: {error_msg}\n"
+						f"Пожалуйста, введите дату в формате *ДД.ММ.ГГГГ*\n"
+						f"Пример: *25.12.2024*",
+						parse_mode='Markdown'
+						)
+				except Exception as e:
+					await update.message.reply_text(
+					f"❌ *Ошибка обработки даты!*\n"
+					f"Пожалуйста, введите дату в формате *ДД.ММ.ГГГГ*\n"
+					f"Пример: *25.12.2024*",
+					parse_mode='Markdown'
+					)
         
         elif state == ADDING_TIME:
             deadline_time = "23:59"
@@ -950,4 +976,5 @@ if __name__ == "__main__":
 
 # # Токен вашего бота
 # BOT_TOKEN = "8316945407:AAEepiQe2QtOhHgCEfgGRJWL5ygghPiDiEg"
+
 
