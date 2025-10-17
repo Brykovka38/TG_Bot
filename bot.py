@@ -5,6 +5,8 @@ import datetime
 import json
 from typing import Dict, List
 import logging
+import pytz
+from datetime import datetime
 
 # Настройка логирования
 logging.basicConfig(
@@ -13,6 +15,39 @@ logging.basicConfig(
 )
 
 BOT_TOKEN = "8316945407:AAEepiQe2QtOhHgCEfgGRJWL5ygghPiDiEg"
+
+# Словарь часовых поясов России
+RUSSIAN_TIMEZONES = {
+    'Калининград': 'Europe/Kaliningrad',      # UTC+2
+    'Москва': 'Europe/Moscow',                # UTC+3
+    'Самара': 'Europe/Samara',                # UTC+4
+    'Екатеринбург': 'Asia/Yekaterinburg',     # UTC+5
+    'Омск': 'Asia/Omsk',                      # UTC+6
+    'Красноярск': 'Asia/Krasnoyarsk',         # UTC+7
+    'Иркутск': 'Asia/Irkutsk',                # UTC+8
+    'Якутск': 'Asia/Yakutsk',                 # UTC+9
+    'Владивосток': 'Asia/Vladivostok',        # UTC+10
+    'Магадан': 'Asia/Magadan',                # UTC+11
+    'Камчатка': 'Asia/Kamchatka'              # UTC+12
+}
+
+# По умолчанию для Новосибирска (UTC+7)
+DEFAULT_TIMEZONE = 'Asia/Novosibirsk'
+
+def get_local_time(timezone_name=DEFAULT_TIMEZONE):
+    """Возвращает текущее время в указанном часовом поясе"""
+    try:
+        tz = pytz.timezone(timezone_name)
+        return datetime.now(tz)
+    except:
+        # Если указанный часовой пояс не найден, используем по умолчанию
+        tz = pytz.timezone(DEFAULT_TIMEZONE)
+        return datetime.now(tz)
+
+def get_user_timezone(user_id):
+    """Получает часовой пояс пользователя из базы данных"""
+    # Пока используем по умолчанию, можно расширить для хранения в БД
+    return DEFAULT_TIMEZONE
 
 def get_cat_image(points):
     """Возвращает путь к локальной картинке котика"""
@@ -47,7 +82,8 @@ class DeadlineManager:
                 username TEXT,
                 total_points INTEGER DEFAULT 0,
                 completed_tasks INTEGER DEFAULT 0,
-                created_at TEXT
+                created_at TEXT,
+                timezone TEXT DEFAULT 'Asia/Novosibirsk'
             )
         ''')
         
@@ -79,20 +115,50 @@ class DeadlineManager:
         
         if user is None:
             cursor.execute(
-                'INSERT INTO users (user_id, username, total_points, completed_tasks, created_at) VALUES (?, ?, ?, ?, ?)',
-                (user_id, username, 0, 0, datetime.datetime.now().isoformat())
+                'INSERT INTO users (user_id, username, total_points, completed_tasks, created_at, timezone) VALUES (?, ?, ?, ?, ?, ?)',
+                (user_id, username, 0, 0, get_local_time().isoformat(), DEFAULT_TIMEZONE)
             )
             conn.commit()
         
         conn.close()
     
-    def add_task(self, user_id: int, task_name: str, deadline_date: str, deadline_time: str = "23:59"):
+    def get_user_timezone(self, user_id: int):
+        """Получает часовой пояс пользователя"""
+        conn = sqlite3.connect('/data/deadlines.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT timezone FROM users WHERE user_id = ?', (user_id,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        return result[0] if result else DEFAULT_TIMEZONE
+    
+    def set_user_timezone(self, user_id: int, timezone: str):
+        """Устанавливает часовой пояс пользователя"""
+        if timezone not in RUSSIAN_TIMEZONES.values():
+            return False
+            
         conn = sqlite3.connect('/data/deadlines.db')
         cursor = conn.cursor()
         
         cursor.execute(
+            'UPDATE users SET timezone = ? WHERE user_id = ?',
+            (timezone, user_id)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    
+    def add_task(self, user_id: int, task_name: str, deadline_date: str, deadline_time: str = "23:59"):
+        conn = sqlite3.connect('/data/deadlines.db')
+        cursor = conn.cursor()
+        
+        user_timezone = self.get_user_timezone(user_id)
+        current_time = get_local_time(user_timezone)
+        
+        cursor.execute(
             'INSERT INTO tasks (user_id, task_name, deadline_date, deadline_time, created_at) VALUES (?, ?, ?, ?, ?)',
-            (user_id, task_name, deadline_date, deadline_time, datetime.datetime.now().isoformat())
+            (user_id, task_name, deadline_date, deadline_time, current_time.isoformat())
         )
         task_id = cursor.lastrowid
         conn.commit()
@@ -173,40 +239,42 @@ class DeadlineManager:
         conn = sqlite3.connect('/data/deadlines.db')
         cursor = conn.cursor()
         
-        now = datetime.datetime.now()
-        current_date = now.date().isoformat()
-        current_time = now.time().strftime('%H:%M')
-        
-        # Получаем все просроченные задачи
+        # Получаем все активные задачи
         cursor.execute('''
             SELECT t.task_id, t.user_id, t.task_name, t.deadline_date, t.deadline_time, 
-                   u.username, t.last_notification
+                   u.username, t.last_notification, u.timezone
             FROM tasks t 
             JOIN users u ON t.user_id = u.user_id 
-            WHERE t.is_completed = FALSE 
-            AND (
-                t.deadline_date < ? 
-                OR (t.deadline_date = ? AND t.deadline_time < ?)
-            )
-        ''', (current_date, current_date, current_time))
+            WHERE t.is_completed = FALSE
+        ''')
         
         tasks = cursor.fetchall()
         conn.close()
         
-        # Фильтруем задачи: отправляем уведомление только если прошло больше 12 часов
+        # Фильтруем задачи по локальному времени каждого пользователя
         tasks_to_notify = []
         for task in tasks:
-            task_id, user_id, task_name, deadline_date, deadline_time, username, last_notification = task
+            task_id, user_id, task_name, deadline_date, deadline_time, username, last_notification, user_timezone = task
             
-            if last_notification:
-                # Проверяем, прошло ли 12 часов с последнего уведомления
-                last_notification_time = datetime.datetime.fromisoformat(last_notification)
-                time_since_last_notification = now - last_notification_time
-                if time_since_last_notification.total_seconds() >= 43200:  # 12 часов в секундах
+            # Получаем текущее время в часовом поясе пользователя
+            user_now = get_local_time(user_timezone)
+            current_date = user_now.date().isoformat()
+            current_time = user_now.time().strftime('%H:%M')
+            
+            # Проверяем просроченность в часовом поясе пользователя
+            is_overdue = (deadline_date < current_date or 
+                         (deadline_date == current_date and deadline_time < current_time))
+            
+            if is_overdue:
+                if last_notification:
+                    # Проверяем, прошло ли 12 часов с последнего уведомления
+                    last_notification_time = datetime.fromisoformat(last_notification)
+                    time_since_last_notification = user_now - last_notification_time
+                    if time_since_last_notification.total_seconds() >= 43200:  # 12 часов
+                        tasks_to_notify.append(task)
+                else:
+                    # Если уведомление никогда не отправлялось
                     tasks_to_notify.append(task)
-            else:
-                # Если уведомление никогда не отправлялось
-                tasks_to_notify.append(task)
         
         return tasks_to_notify
 
@@ -219,16 +287,16 @@ async def check_deadlines(context: ContextTypes.DEFAULT_TYPE):
         print(f"🔍 Проверка дедлайнов... Найдено {len(overdue_tasks)} просроченных задач")
         
         for task in overdue_tasks:
-            task_id, user_id, task_name, deadline_date, deadline_time, username, last_notification = task
+            task_id, user_id, task_name, deadline_date, deadline_time, username, last_notification, user_timezone = task
             
-            # Отладочная информация
-            now = datetime.datetime.now()
-            current_date = now.date().isoformat()
-            current_time = now.time().strftime('%H:%M')
+            # Получаем текущее время пользователя для отладочной информации
+            user_now = get_local_time(user_timezone)
+            current_date = user_now.date().isoformat()
+            current_time = user_now.time().strftime('%H:%M')
             
             print(f"📋 Задача {task_id}: {task_name}")
             print(f"   Дедлайн: {deadline_date} {deadline_time}")
-            print(f"   Сейчас: {current_date} {current_time}")
+            print(f"   Сейчас у пользователя: {current_date} {current_time} ({user_timezone})")
             print(f"   Пользователь: {user_id}")
             
             # Форматируем дату для сообщения
@@ -255,7 +323,7 @@ async def check_deadlines(context: ContextTypes.DEFAULT_TYPE):
                 cursor = conn.cursor()
                 cursor.execute(
                     'UPDATE tasks SET last_notification = ? WHERE task_id = ?',
-                    (datetime.datetime.now().isoformat(), task_id)
+                    (user_now.isoformat(), task_id)
                 )
                 conn.commit()
                 conn.close()
@@ -274,6 +342,7 @@ def get_main_keyboard():
         [KeyboardButton("Завершить дедлайн")],
         [KeyboardButton("Посмотреть все задачи")],
         [KeyboardButton("Посмотреть мой статус")],
+        [KeyboardButton("Настройки времени")],  # Новая кнопка
     ]
     return ReplyKeyboardMarkup(
         keyboard,
@@ -281,8 +350,22 @@ def get_main_keyboard():
         input_field_placeholder="Выберите действие..."
     )
 
+def get_timezone_keyboard():
+    """Клавиатура для выбора часового пояса"""
+    timezones = [
+        ["Калининград (UTC+2)", "Москва (UTC+3)"],
+        ["Самара (UTC+4)", "Екатеринбург (UTC+5)"],
+        ["Омск (UTC+6)", "Новосибирск (UTC+7)"],
+        ["Красноярск (UTC+7)", "Иркутск (UTC+8)"],
+        ["Якутск (UTC+9)", "Владивосток (UTC+10)"],
+        ["Магадан (UTC+11)", "Камчатка (UTC+12)"],
+        ["Назад в меню"]
+    ]
+    return ReplyKeyboardMarkup(timezones, resize_keyboard=True)
+
 # Состояния для диалога добавления задачи
 ADDING_TASK, ADDING_DATE, ADDING_TIME = range(3)
+SETTING_TIMEZONE = 4
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start для любых чатов"""
@@ -293,9 +376,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         deadline_manager.get_or_create_user(user.id, user.username or user.first_name)
         
-        welcome_text = f"""*Привет, {user.first_name}!*
+        # Получаем текущий часовой пояс пользователя
+        user_timezone = deadline_manager.get_user_timezone(user.id)
+        current_time = get_local_time(user_timezone)
+        
+        welcome_text = f"""*Привет, {user.first_name}!* 🕐
 
 📅 *Система управления дедлайнами*
+
+🕒 *Ваш часовой пояс:* {user_timezone}
+⏰ *Текущее время:* {current_time.strftime('%H:%M')}
 
 За каждую выполненную задачу ты получаешь *50 баллов*!
 
@@ -402,6 +492,10 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         stats = deadline_manager.get_user_stats(user_id)
         points = stats['total_points']
         
+        # Получаем текущий часовой пояс
+        user_timezone = deadline_manager.get_user_timezone(user_id)
+        current_time = get_local_time(user_timezone)
+        
         # Получаем картинку котика
         cat_image_path = get_cat_image(points)
         
@@ -440,6 +534,8 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
 🎯 *Выполнено задач:* {stats['completed_tasks']}
 📊 *Активных задач:* {stats['active_tasks']}
 💰 *Всего баллов:* {stats['total_points']}
+🕒 *Часовой пояс:* {user_timezone}
+⏰ *Текущее время:* {current_time.strftime('%H:%M')}
 
 💡 *Следующая цель:*
 {next_goal}
@@ -463,6 +559,31 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
                 reply_markup=get_main_keyboard(),
                 parse_mode='Markdown'
             )
+    
+    elif text == "Настройки времени":
+        user_timezone = deadline_manager.get_user_timezone(user_id)
+        current_time = get_local_time(user_timezone)
+        
+        timezone_text = f"""🕒 *Настройки времени*
+
+*Текущий часовой пояс:* {user_timezone}
+*Текущее время:* {current_time.strftime('%H:%M %d.%m.%Y')}
+
+Выберите ваш город для настройки времени:"""
+        
+        await update.message.reply_text(
+            timezone_text,
+            reply_markup=get_timezone_keyboard(),
+            parse_mode='Markdown'
+        )
+        context.user_data['state'] = SETTING_TIMEZONE
+    
+    elif text == "Назад в меню":
+        await update.message.reply_text(
+            "Возвращаемся в главное меню!",
+            reply_markup=get_main_keyboard()
+        )
+        context.user_data.clear()
     
     else:
         # Обработка состояний диалога
@@ -578,6 +699,47 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
                     "❌ *Неверный формат!*\n"
                     "Пожалуйста, введите числовой ID задачи:",
                     parse_mode='Markdown'
+                )
+        
+        elif state == SETTING_TIMEZONE:
+            # Обработка выбора часового пояса
+            timezone_mapping = {
+                "Калининград (UTC+2)": "Europe/Kaliningrad",
+                "Москва (UTC+3)": "Europe/Moscow", 
+                "Самара (UTC+4)": "Europe/Samara",
+                "Екатеринбург (UTC+5)": "Asia/Yekaterinburg",
+                "Омск (UTC+6)": "Asia/Omsk",
+                "Новосибирск (UTC+7)": "Asia/Novosibirsk",
+                "Красноярск (UTC+7)": "Asia/Krasnoyarsk",
+                "Иркутск (UTC+8)": "Asia/Irkutsk",
+                "Якутск (UTC+9)": "Asia/Yakutsk",
+                "Владивосток (UTC+10)": "Asia/Vladivostok",
+                "Магадан (UTC+11)": "Asia/Magadan",
+                "Камчатка (UTC+12)": "Asia/Kamchatka"
+            }
+            
+            if text in timezone_mapping:
+                new_timezone = timezone_mapping[text]
+                if deadline_manager.set_user_timezone(user_id, new_timezone):
+                    current_time = get_local_time(new_timezone)
+                    await update.message.reply_text(
+                        f"✅ *Часовой пояс успешно изменен!*\n\n"
+                        f"🕒 *Новый часовой пояс:* {new_timezone}\n"
+                        f"⏰ *Текущее время:* {current_time.strftime('%H:%M %d.%m.%Y')}\n\n"
+                        f"Теперь все дедлайны будут рассчитываться по вашему локальному времени!",
+                        reply_markup=get_main_keyboard(),
+                        parse_mode='Markdown'
+                    )
+                    context.user_data.clear()
+                else:
+                    await update.message.reply_text(
+                        "❌ Ошибка при изменении часового пояса. Попробуйте еще раз.",
+                        reply_markup=get_timezone_keyboard()
+                    )
+            else:
+                await update.message.reply_text(
+                    "Пожалуйста, выберите часовой пояс из списка:",
+                    reply_markup=get_timezone_keyboard()
                 )
         
         else:
@@ -777,6 +939,4 @@ if __name__ == "__main__":
 
 # # Токен вашего бота
 # BOT_TOKEN = "8316945407:AAEepiQe2QtOhHgCEfgGRJWL5ygghPiDiEg"
-
-
 
