@@ -386,11 +386,11 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
                 response_text += f"  🆔 *ID*: {task_id}\n\n"
         
         if completed_tasks:
-            response_text += "✅ *ВЫПОЛНЕННЫЕ ЗАДАЧИ:*\n"
+            response_text += "*ВЫПОЛНЕННЫЕ ЗАДАЧИ:*\n"
             for task in completed_tasks:
                 task_id, _, task_name, deadline_date, deadline_time, is_completed, points_awarded, created_at, last_notification = task
                 status = "+50 баллов" if points_awarded else "Выполнено"
-                response_text += f"• {task_name} - {status}\n\n"
+                response_text += f"• {task_name} - {status}\n"
         
         await update.message.reply_text(
             response_text,
@@ -777,4 +777,5 @@ if __name__ == "__main__":
 
 # # Токен вашего бота
 # BOT_TOKEN = "8316945407:AAEepiQe2QtOhHgCEfgGRJWL5ygghPiDiEg"
+
 
