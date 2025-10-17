@@ -37,7 +37,7 @@ class DeadlineManager:
         self.init_database()
     
     def init_database(self):
-		conn = sqlite3.connect('/data/deadlines.db')
+        conn = sqlite3.connect('/data/deadlines.db')
         cursor = conn.cursor()
         
         # Таблица пользователей
@@ -777,5 +777,6 @@ if __name__ == "__main__":
 
 # # Токен вашего бота
 # BOT_TOKEN = "8316945407:AAEepiQe2QtOhHgCEfgGRJWL5ygghPiDiEg"
+
 
 
