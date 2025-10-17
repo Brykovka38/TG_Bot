@@ -70,6 +70,30 @@ def get_cat_image(points):
 class DeadlineManager:
     def __init__(self):
         self.init_database()
+        self.update_database_schema()  # Обновляем схему БД
+    
+    def update_database_schema(self):
+        """Обновляет структуру базы данных, добавляя недостающие столбцы"""
+        conn = sqlite3.connect('/data/deadlines.db')
+        cursor = conn.cursor()
+        
+        try:
+            # Проверяем существует ли столбец timezone в таблице users
+            cursor.execute("PRAGMA table_info(users)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'timezone' not in columns:
+                print("🔄 Добавляем столбец timezone в таблицу users...")
+                cursor.execute('ALTER TABLE users ADD COLUMN timezone TEXT DEFAULT "Asia/Novosibirsk"')
+                conn.commit()
+                print("✅ Столбец timezone успешно добавлен")
+            else:
+                print("✅ Столбец timezone уже существует")
+                
+        except Exception as e:
+            print(f"❌ Ошибка при обновлении схемы БД: {e}")
+        finally:
+            conn.close()
     
     def init_database(self):
         conn = sqlite3.connect('/data/deadlines.db')
@@ -106,6 +130,7 @@ class DeadlineManager:
         conn.commit()
         conn.close()
     
+    # Остальные методы остаются без изменений...
     def get_or_create_user(self, user_id: int, username: str = ""):
         conn = sqlite3.connect('/data/deadlines.db')
         cursor = conn.cursor()
@@ -133,21 +158,7 @@ class DeadlineManager:
         
         return result[0] if result else DEFAULT_TIMEZONE
     
-    def set_user_timezone(self, user_id: int, timezone: str):
-        """Устанавливает часовой пояс пользователя"""
-        if timezone not in RUSSIAN_TIMEZONES.values():
-            return False
-            
-        conn = sqlite3.connect('/data/deadlines.db')
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            'UPDATE users SET timezone = ? WHERE user_id = ?',
-            (timezone, user_id)
-        )
-        conn.commit()
-        conn.close()
-        return True
+
     
     def add_task(self, user_id: int, task_name: str, deadline_date: str, deadline_time: str = "23:59"):
         conn = sqlite3.connect('/data/deadlines.db')
