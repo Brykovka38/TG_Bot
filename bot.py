@@ -6,7 +6,7 @@ import json
 from typing import Dict, List
 import logging
 import pytz
-from datetime import datetime
+from datetime import datetime, date, time
 
 # Настройка логирования
 logging.basicConfig(
@@ -158,7 +158,25 @@ class DeadlineManager:
         
         return result[0] if result else DEFAULT_TIMEZONE
     
-
+    def set_user_timezone(self, user_id: int, timezone: str):
+        """Устанавливает часовой пояс пользователя"""
+        conn = sqlite3.connect('/data/deadlines.db')
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(
+                'UPDATE users SET timezone = ? WHERE user_id = ?',
+                (timezone, user_id)
+            )
+            conn.commit()
+            success = True
+        except Exception as e:
+            print(f"Ошибка при установке часового пояса: {e}")
+            success = False
+        finally:
+            conn.close()
+        
+        return success
     
     def add_task(self, user_id: int, task_name: str, deadline_date: str, deadline_time: str = "23:59"):
         conn = sqlite3.connect('/data/deadlines.db')
@@ -633,9 +651,12 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
                 if year < 1000 or year > 2100:
                     raise ValueError("Год должен быть от 1000 до 2100")
 
-                # Проверяем корректность даты
-                deadline_date_obj = datetime.date(year, month, day)
-                deadline_date = deadline_date_obj.isoformat()
+                # Проверяем корректность даты с помощью datetime
+                try:
+                    deadline_date_obj = datetime(year, month, day)
+                    deadline_date = deadline_date_obj.date().isoformat()  # Получаем только дату
+                except ValueError as e:
+                    raise ValueError(f"Некорректная дата: {e}")
 
                 context.user_data['deadline_date'] = deadline_date
         
@@ -649,10 +670,10 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         
             except ValueError as e:
                 error_msg = str(e)
-                if "day is out of range" in error_msg.lower():
+                if "day is out of range" in error_msg.lower() or "month must be in" in error_msg.lower():
                     await update.message.reply_text(
                         "❌ *Неверная дата!*\n"
-                        "В этом месяце нет такого дня!\n"
+                        "В этом месяце нет такого дня или дата некорректна!\n"
                         "Пожалуйста, введите корректную дату:",
                         parse_mode='Markdown'
                     )
@@ -976,6 +997,7 @@ if __name__ == "__main__":
 
 # # Токен вашего бота
 # BOT_TOKEN = "8316945407:AAEepiQe2QtOhHgCEfgGRJWL5ygghPiDiEg"
+
 
 
 
