@@ -1,5 +1,8 @@
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 import sqlite3
 import datetime
 import json
@@ -14,7 +17,14 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-BOT_TOKEN = "8316945407:AAEepiQe2QtOhHgCEfgGRJWL5ygghPiDiEg"
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+DB_PATH = Path(os.getenv("DB_PATH", "deadlines.db"))
+if not DB_PATH.is_absolute():
+    DB_PATH = BASE_DIR / DB_PATH
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Словарь часовых поясов России
 RUSSIAN_TIMEZONES = {
@@ -31,7 +41,6 @@ RUSSIAN_TIMEZONES = {
     'Камчатка': 'Asia/Kamchatka'              # UTC+12
 }
 
-# По умолчанию для Новосибирска (UTC+7)
 DEFAULT_TIMEZONE = 'Asia/Novosibirsk'
 
 def get_local_time(timezone_name=DEFAULT_TIMEZONE):
@@ -40,13 +49,11 @@ def get_local_time(timezone_name=DEFAULT_TIMEZONE):
         tz = pytz.timezone(timezone_name)
         return datetime.now(tz)
     except:
-        # Если указанный часовой пояс не найден, используем по умолчанию
         tz = pytz.timezone(DEFAULT_TIMEZONE)
         return datetime.now(tz)
 
 def get_user_timezone(user_id):
     """Получает часовой пояс пользователя из базы данных"""
-    # Пока используем по умолчанию, можно расширить для хранения в БД
     return DEFAULT_TIMEZONE
 
 def get_cat_image(points):
@@ -63,22 +70,24 @@ def get_cat_image(points):
     suitable_levels = [level for level in cat_images.keys() if points >= level]
     if suitable_levels:
         level = max(suitable_levels)
-        return cat_images[level]
+        filename = cat_images[level]
     else:
-        return cat_images[0]
+        filename = cat_images[0]
+
+    image_path = BASE_DIR / "assets" / "cats" / filename
+    return str(image_path if image_path.is_file() else BASE_DIR / filename)
 
 class DeadlineManager:
     def __init__(self):
         self.init_database()
-        self.update_database_schema()  # Обновляем схему БД
+        self.update_database_schema()  
     
     def update_database_schema(self):
         """Обновляет структуру базы данных, добавляя недостающие столбцы"""
-        conn = sqlite3.connect('/data/deadlines.db')
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         try:
-            # Проверяем существует ли столбец timezone в таблице users
             cursor.execute("PRAGMA table_info(users)")
             columns = [column[1] for column in cursor.fetchall()]
             
@@ -96,7 +105,7 @@ class DeadlineManager:
             conn.close()
     
     def init_database(self):
-        conn = sqlite3.connect('/data/deadlines.db')
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         # Таблица пользователей
@@ -129,10 +138,9 @@ class DeadlineManager:
         
         conn.commit()
         conn.close()
-    
-    # Остальные методы остаются без изменений...
+
     def get_or_create_user(self, user_id: int, username: str = ""):
-        conn = sqlite3.connect('/data/deadlines.db')
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
@@ -149,7 +157,7 @@ class DeadlineManager:
     
     def get_user_timezone(self, user_id: int):
         """Получает часовой пояс пользователя"""
-        conn = sqlite3.connect('/data/deadlines.db')
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         cursor.execute('SELECT timezone FROM users WHERE user_id = ?', (user_id,))
@@ -160,7 +168,7 @@ class DeadlineManager:
     
     def set_user_timezone(self, user_id: int, timezone: str):
         """Устанавливает часовой пояс пользователя"""
-        conn = sqlite3.connect('/data/deadlines.db')
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         try:
@@ -179,7 +187,7 @@ class DeadlineManager:
         return success
     
     def add_task(self, user_id: int, task_name: str, deadline_date: str, deadline_time: str = "23:59"):
-        conn = sqlite3.connect('/data/deadlines.db')
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         user_timezone = self.get_user_timezone(user_id)
@@ -196,37 +204,33 @@ class DeadlineManager:
         return task_id
     
     def complete_task(self, user_id: int, task_id: int):
-        conn = sqlite3.connect('/data/deadlines.db')
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Помечаем задачу как выполненную
         cursor.execute(
             'UPDATE tasks SET is_completed = TRUE WHERE task_id = ? AND user_id = ?',
             (task_id, user_id)
         )
-        
-        # Начисляем баллы если еще не начисляли
+
         cursor.execute(
-            'SELECT points_awarded FROM tasks WHERE task_id = ?', (task_id,)
+            'SELECT points_awarded FROM tasks WHERE task_id = ? AND user_id = ?', (task_id, user_id)
         )
         task = cursor.fetchone()
         
         if task and not task[0]:
-            # Добавляем баллы
             cursor.execute(
                 'UPDATE users SET total_points = total_points + 50, completed_tasks = completed_tasks + 1 WHERE user_id = ?',
                 (user_id,)
             )
-            # Помечаем что баллы начислены
             cursor.execute(
-                'UPDATE tasks SET points_awarded = TRUE WHERE task_id = ?', (task_id,)
+                'UPDATE tasks SET points_awarded = TRUE WHERE task_id = ? AND user_id = ?', (task_id, user_id)
             )
         
         conn.commit()
         conn.close()
     
     def get_user_tasks(self, user_id: int, include_completed: bool = False):
-        conn = sqlite3.connect('/data/deadlines.db')
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         if include_completed:
@@ -246,7 +250,7 @@ class DeadlineManager:
         return tasks
     
     def get_user_stats(self, user_id: int):
-        conn = sqlite3.connect('/data/deadlines.db')
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         cursor.execute('SELECT total_points, completed_tasks FROM users WHERE user_id = ?', (user_id,))
@@ -265,10 +269,9 @@ class DeadlineManager:
     
     def get_overdue_tasks(self):
         """Получить просроченные задачи, которым нужно отправить уведомление"""
-        conn = sqlite3.connect('/data/deadlines.db')
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Получаем все активные задачи
         cursor.execute('''
             SELECT t.task_id, t.user_id, t.task_name, t.deadline_date, t.deadline_time, 
                    u.username, t.last_notification, u.timezone
@@ -279,30 +282,25 @@ class DeadlineManager:
         
         tasks = cursor.fetchall()
         conn.close()
-        
-        # Фильтруем задачи по локальному времени каждого пользователя
+
         tasks_to_notify = []
         for task in tasks:
             task_id, user_id, task_name, deadline_date, deadline_time, username, last_notification, user_timezone = task
             
-            # Получаем текущее время в часовом поясе пользователя
             user_now = get_local_time(user_timezone)
             current_date = user_now.date().isoformat()
             current_time = user_now.time().strftime('%H:%M')
             
-            # Проверяем просроченность в часовом поясе пользователя
             is_overdue = (deadline_date < current_date or 
                          (deadline_date == current_date and deadline_time < current_time))
             
             if is_overdue:
                 if last_notification:
-                    # Проверяем, прошло ли 12 часов с последнего уведомления
                     last_notification_time = datetime.fromisoformat(last_notification)
                     time_since_last_notification = user_now - last_notification_time
                     if time_since_last_notification.total_seconds() >= 43200:  # 12 часов
                         tasks_to_notify.append(task)
                 else:
-                    # Если уведомление никогда не отправлялось
                     tasks_to_notify.append(task)
         
         return tasks_to_notify
@@ -318,7 +316,6 @@ async def check_deadlines(context: ContextTypes.DEFAULT_TYPE):
         for task in overdue_tasks:
             task_id, user_id, task_name, deadline_date, deadline_time, username, last_notification, user_timezone = task
             
-            # Получаем текущее время пользователя для отладочной информации
             user_now = get_local_time(user_timezone)
             current_date = user_now.date().isoformat()
             current_time = user_now.time().strftime('%H:%M')
@@ -346,9 +343,8 @@ async def check_deadlines(context: ContextTypes.DEFAULT_TYPE):
                     text=message,
                     parse_mode='Markdown'
                 )
-                
-                # ОБНОВЛЯЕМ ВРЕМЯ ПОСЛЕДНЕГО УВЕДОМЛЕНИЯ
-                conn = sqlite3.connect('/data/deadlines.db')
+
+                conn = sqlite3.connect(DB_PATH)
                 cursor = conn.cursor()
                 cursor.execute(
                     'UPDATE tasks SET last_notification = ? WHERE task_id = ?',
@@ -371,7 +367,7 @@ def get_main_keyboard():
         [KeyboardButton("Завершить дедлайн")],
         [KeyboardButton("Посмотреть все задачи")],
         [KeyboardButton("Посмотреть мой статус")],
-        [KeyboardButton("Настройки времени")],  # Новая кнопка
+        [KeyboardButton("Настройки времени")], 
     ]
     return ReplyKeyboardMarkup(
         keyboard,
@@ -392,20 +388,17 @@ def get_timezone_keyboard():
     ]
     return ReplyKeyboardMarkup(timezones, resize_keyboard=True)
 
-# Состояния для диалога добавления задачи
 ADDING_TASK, ADDING_DATE, ADDING_TIME = range(3)
 SETTING_TIMEZONE = 4
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start для любых чатов"""
     if update.message.chat.type == 'private':
-        # Личный чат - показываем полное меню
         user = update.message.from_user
         deadline_manager = context.bot_data['deadline_manager']
         
         deadline_manager.get_or_create_user(user.id, user.username or user.first_name)
         
-        # Получаем текущий часовой пояс пользователя
         user_timezone = deadline_manager.get_user_timezone(user.id)
         current_time = get_local_time(user_timezone)
         
@@ -426,7 +419,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     else:
-        # Групповой чат - упрощенное сообщение
         await update.message.reply_text(
             "🤖 Бот для управления дедлайнами активирован!\n"
             "Используйте /help для списка команд"
@@ -437,8 +429,7 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
     text = update.message.text
     user_id = update.message.from_user.id
     deadline_manager = context.bot_data['deadline_manager']
-    
-    # Создаем/получаем пользователя
+
     deadline_manager.get_or_create_user(user_id, update.message.from_user.username or update.message.from_user.first_name)
     
     if text == "Добавить дедлайн":
@@ -521,11 +512,9 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         stats = deadline_manager.get_user_stats(user_id)
         points = stats['total_points']
         
-        # Получаем текущий часовой пояс
         user_timezone = deadline_manager.get_user_timezone(user_id)
         current_time = get_local_time(user_timezone)
-        
-        # Получаем картинку котика
+
         cat_image_path = get_cat_image(points)
         
         # Определяем уровень и сообщение
@@ -572,7 +561,6 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
 🐾 *Продолжайте в том же духе! Каждая задача приближает вас к новому уровню!* 🎁"""
         
         try:
-            # Отправляем картинку с подписью
             with open(cat_image_path, 'rb') as photo:
                 await update.message.reply_photo(
                     photo=photo,
@@ -581,7 +569,6 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
                     parse_mode='Markdown'
                 )
         except Exception as e:
-            # Если не удалось отправить картинку, отправляем только текст
             print(f"Ошибка при отправке картинки: {e}")
             await update.message.reply_text(
                 status_text,
@@ -651,10 +638,10 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
                 if year < 1000 or year > 2100:
                     raise ValueError("Год должен быть от 1000 до 2100")
 
-                # Проверяем корректность даты с помощью datetime
+                # Проверяем корректность даты 
                 try:
                     deadline_date_obj = datetime(year, month, day)
-                    deadline_date = deadline_date_obj.date().isoformat()  # Получаем только дату
+                    deadline_date = deadline_date_obj.date().isoformat()  
                 except ValueError as e:
                     raise ValueError(f"Некорректная дата: {e}")
 
@@ -814,8 +801,6 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     
     # Инициализируем менеджер дедлайнов
     deadline_manager = context.bot_data['deadline_manager']
-    
-    # Создаем/получаем пользователя
     deadline_manager.get_or_create_user(user_id, update.message.from_user.username or update.message.from_user.first_name)
     
     # Бот реагирует на команды или упоминания
@@ -958,6 +943,9 @@ async def add_deadline_command(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 def main():
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN is not configured. Set it in .env or environment variables.")
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     application = Application.builder().token(BOT_TOKEN).build()
     
     application.bot_data['deadline_manager'] = DeadlineManager()
@@ -969,13 +957,13 @@ def main():
     application.add_handler(CommandHandler("my_stats", my_stats_command))
     application.add_handler(CommandHandler("add_deadline", add_deadline_command))
     
-    # Обработчики для личных сообщений (кнопки)
+    # Обработчики для личных сообщений
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, 
         handle_private_message
     ))
     
-    # Обработчики для групповых чатов (текстовые сообщения)
+    # Обработчики для групповых чатов
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), 
         handle_group_message
@@ -994,11 +982,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# # Токен вашего бота
-# BOT_TOKEN = "8316945407:AAEepiQe2QtOhHgCEfgGRJWL5ygghPiDiEg"
-
-
-
-
-
