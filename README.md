@@ -1,12 +1,6 @@
-# Deadline Cat — Telegram Task Manager
+# Telegram Task Manager
 
 Telegram-бот для управления личными задачами, контроля дедлайнов и мотивации с помощью системы достижений.
-
-![Python](https://img.shields.io/badge/Python-3.10-3776AB?style=flat-square&logo=python&logoColor=white)
-![Telegram](https://img.shields.io/badge/Telegram-Bot_API-26A5E4?style=flat-square&logo=telegram&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white)
-![Async](https://img.shields.io/badge/Async-await-6C63FF?style=flat-square)
-![APScheduler](https://img.shields.io/badge/APScheduler-JobQueue-orange?style=flat-square)
 
 ## О проекте
 
